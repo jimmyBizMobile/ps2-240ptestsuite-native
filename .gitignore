@@ -1,0 +1,27 @@
+# Build artifacts
+*.elf
+*.o
+*.a
+*.irx
+
+# Generated files (rebuilt by `make gen_assets` from assets/ + tools/)
+src/assets_data.c
+src/assets_data.h
+src/font_data.h
+src/monoscope_rects.h
+assets/font_atlas.png
+
+# Python tooling cruft
+__pycache__/
+*.pyc
+
+# Archives
+*.zip
+
+# OS / editor
+.DS_Store
+._*
+.vscode/
+.idea/
+*.swp
+*~
