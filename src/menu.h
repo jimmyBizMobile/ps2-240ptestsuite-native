@@ -9,6 +9,8 @@ typedef enum {
     MENU_MONOSCOPE,
     MENU_PLUGE,
     MENU_COLORBARS,
+    MENU_SMPTE,
+    MENU_COLORBLEED,
     MENU_VIDEO,
     MENU_HELP,
     MENU_CREDITS,

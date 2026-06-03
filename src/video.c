@@ -105,15 +105,6 @@ int video_current_mode(void) { return g_mode; }
 int video_width(void)  { return (g_mode == VIDEO_MODE_240P) ? FB_240P_W : FB_480I_W; }
 int video_height(void) { return (g_mode == VIDEO_MODE_240P) ? FB_240P_H : FB_480I_H; }
 
-// Capture the real GS display values so they can be shown on screen.
-static int dbg_startx, dbg_dw, dbg_magh, dbg_width, dbg_starty, dbg_dh, dbg_magv;
-void video_debug_values(int *startx, int *dw, int *magh, int *width,
-                        int *starty, int *dh, int *magv)
-{
-    *startx = dbg_startx; *dw = dbg_dw; *magh = dbg_magh; *width = dbg_width;
-    *starty = dbg_starty; *dh = dbg_dh; *magv = dbg_magv;
-}
-
 void video_clear_black(GSGLOBAL *gs)
 {
     gsKit_clear(gs, GS_SETREG_RGBAQ(0, 0, 0, 0, 0));

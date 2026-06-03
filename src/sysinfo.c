@@ -22,6 +22,10 @@ const char *sysinfo_output_label(void)
 const char *sysinfo_console_label(void)
 {
     static char label[32];
+    static int initialized = 0;
+    if (initialized) return label;
+    initialized = 1;
+
     char romver[16];
     int fd = open("rom0:ROMVER", O_RDONLY);
     if (fd >= 0) {

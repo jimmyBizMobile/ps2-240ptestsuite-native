@@ -223,11 +223,14 @@ void patterns_draw_colorbars(GSGLOBAL *gs)
     #undef R
 
     // Channel labels.
+    u64 red = GS_SETREG_RGBAQ(0xFF, 0x00, 0x00, 0x80, 0);
+    u64 green = GS_SETREG_RGBAQ(0x00, 0xFF, 0x00, 0x80, 0);
+    u64 blue = GS_SETREG_RGBAQ(0x00, 0x00, 0xFF, 0x80, 0);
     u64 white = GS_SETREG_RGBAQ(0x80, 0x80, 0x80, 0x80, 0);
     float fsc = (s >= 2) ? 1.0f : 0.5f;
-    font_print(gs, 2.0f * s, (yR + 11) * s, fsc, white, "RED");
-    font_print(gs, 2.0f * s, (yG + 11) * s, fsc, white, "GREEN");
-    font_print(gs, 2.0f * s, (yB + 11) * s, fsc, white, "BLUE");
+    font_print(gs, 2.0f * s, (yR + 11) * s, fsc, red, "RED");
+    font_print(gs, 2.0f * s, (yG + 11) * s, fsc, green, "GREEN");
+    font_print(gs, 2.0f * s, (yB + 11) * s, fsc, blue, "BLUE");
     font_print(gs, 2.0f * s, (yW + 11) * s, fsc, white, "WHITE");
 
     // Optional hex column header 0..F across the top of the bars.
@@ -236,5 +239,107 @@ void patterns_draw_colorbars(GSGLOBAL *gs)
     for (int i = 0; i < NCOL; i++) {
         ch[0] = hex[i];
         font_print(gs, (X0 + i*STEPW + 4) * s, (yR - 12) * s, fsc, white, ch);
+    }
+}
+
+// SMPTE color bars. Reproduction of the reference, re-authored at 320x224
+// (the suite's native height) instead of the source's 320x240, so it uses
+// clean integer scaling like the other patterns. Section ratios preserved
+// (~67% top bars / 8% middle strip / 25% bottom pluge). Horizontal layout
+// and all colors match the reference exactly. Bar level toggles 75% <-> 100%
+// via patterns_smpte_toggle() (184 -> 255). Solid primitives, x1/x2 scale.
+static int g_smpte_100 = 0;   // 0 = 75%, 1 = 100%
+void patterns_smpte_toggle(void) { g_smpte_100 = !g_smpte_100; }
+int  patterns_smpte_is_100(void) { return g_smpte_100; }
+
+void patterns_draw_smpte(GSGLOBAL *gs)
+{
+    int sw = video_width();
+    int s  = sw / 320;
+    if (s < 1) s = 1;
+
+    int hi = g_smpte_100 ? 255 : 184;   // top-bar level toggles
+    int lo = 0;
+
+    // top primary bars (gray, yellow, cyan, green, magenta, red, blue)
+    u64 c_gray = GS_SETREG_RGBAQ(hi, hi, hi, 0x80, 0);
+    u64 c_yel  = GS_SETREG_RGBAQ(hi, hi, lo, 0x80, 0);
+    u64 c_cyan = GS_SETREG_RGBAQ(lo, hi, hi, 0x80, 0);
+    u64 c_grn  = GS_SETREG_RGBAQ(lo, hi, lo, 0x80, 0);
+    u64 c_mag  = GS_SETREG_RGBAQ(hi, lo, hi, 0x80, 0);
+    u64 c_red  = GS_SETREG_RGBAQ(hi, lo, lo, 0x80, 0);
+    u64 c_blu  = GS_SETREG_RGBAQ(lo, lo, hi, 0x80, 0);
+
+    // middle strip + bottom section (fixed reference values)
+    u64 c_blue  = GS_SETREG_RGBAQ(0,   0,   184, 0x80, 0);
+    u64 c_black = GS_SETREG_RGBAQ(8,   12,  8,   0x80, 0);
+    u64 c_mags  = GS_SETREG_RGBAQ(184, 0,   184, 0x80, 0);
+    u64 c_cyans = GS_SETREG_RGBAQ(0,   188, 184, 0x80, 0);
+    u64 c_grays = GS_SETREG_RGBAQ(184, 188, 184, 0x80, 0);
+    u64 c_I     = GS_SETREG_RGBAQ(0,   32,  72,  0x80, 0);  // -I
+    u64 c_white = GS_SETREG_RGBAQ(248, 252, 248, 0x80, 0);  // 100% white
+    u64 c_Q     = GS_SETREG_RGBAQ(48,  0,   96,  0x80, 0);  // +Q
+    u64 c_supb  = GS_SETREG_RGBAQ(0,   4,   0,   0x80, 0);  // super black
+    u64 c_jab   = GS_SETREG_RGBAQ(16,  20,  16,  0x80, 0);  // just above black
+
+    gsKit_clear(gs, GS_SETREG_RGBAQ(0, 0, 0, 0x80, 0));
+
+    #define R(x,y,w,h,col) gsKit_prim_sprite(gs, \
+        (float)((x)*s), (float)((y)*s), \
+        (float)(((x)+(w))*s), (float)(((y)+(h))*s), 2, (col))
+
+    // section heights (sum to 224): top 150, middle 18, bottom 56
+    const int TOP_H = 150, MID_H = 18, BOT_H = 56;
+    const int MID_Y = TOP_H;              // 150
+    const int BOT_Y = TOP_H + MID_H;      // 168
+
+    // bar x-boundaries (320-wide, from the reference)
+    int bx[8] = {0, 46, 92, 138, 183, 228, 274, 320};
+
+    // --- TOP bars ---
+    u64 topc[7] = {c_gray, c_yel, c_cyan, c_grn, c_mag, c_red, c_blu};
+    for (int i = 0; i < 7; i++) R(bx[i], 0, bx[i+1]-bx[i], TOP_H, topc[i]);
+
+    // --- MIDDLE reverse strip ---
+    u64 midc[7] = {c_blue, c_black, c_mags, c_black, c_cyans, c_black, c_grays};
+    for (int i = 0; i < 7; i++) R(bx[i], MID_Y, bx[i+1]-bx[i], MID_H, midc[i]);
+
+    // --- BOTTOM pluge section ---
+    R(0,   BOT_Y, 60, BOT_H, c_I);
+    R(60,  BOT_Y, 60, BOT_H, c_white);
+    R(120, BOT_Y, 60, BOT_H, c_Q);
+    R(180, BOT_Y, 60, BOT_H, c_black);
+    R(240, BOT_Y, 15, BOT_H, c_supb);
+    R(255, BOT_Y, 17, BOT_H, c_black);
+    R(272, BOT_Y, 15, BOT_H, c_jab);
+    R(287, BOT_Y, 33, BOT_H, c_black);
+
+    #undef R
+}
+
+// Color bleed check. Four horizontal bands (red, green, blue, white) each
+// made of 1px-on / 1px-off vertical stripes - reveals horizontal color
+// bleed/crosstalk. Exact reproduction (verified 0 diff). Solid primitives.
+void patterns_draw_colorbleed(GSGLOBAL *gs)
+{
+    int sw = video_width();
+    int s  = sw / 320;
+    if (s < 1) s = 1;
+
+    u64 c_red   = GS_SETREG_RGBAQ(240, 0,   0,   0x80, 0);
+    u64 c_green = GS_SETREG_RGBAQ(0,   244, 0,   0x80, 0);
+    u64 c_blue  = GS_SETREG_RGBAQ(0,   0,   240, 0x80, 0);
+    u64 c_white = GS_SETREG_RGBAQ(240, 244, 240, 0x80, 0);
+
+    gsKit_clear(gs, GS_SETREG_RGBAQ(0, 0, 0, 0x80, 0));
+
+    int yb[4] = {40, 80, 120, 160};
+    u64 cb[4] = {c_red, c_green, c_blue, c_white};
+    for (int b = 0; b < 4; b++) {
+        for (int x = 16; x <= 302; x += 2) {      // lit every other column
+            gsKit_prim_sprite(gs,
+                (float)(x*s), (float)(yb[b]*s),
+                (float)((x+1)*s), (float)((yb[b]+32)*s), 2, cb[b]);
+        }
     }
 }

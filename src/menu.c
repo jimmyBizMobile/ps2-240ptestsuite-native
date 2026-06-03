@@ -19,6 +19,8 @@ static MenuEntry g_entries[MENU_ITEM_COUNT] = {
     { MENU_MONOSCOPE, "Monoscope",  0 },
     { MENU_PLUGE,     "Pluge",      0 },
     { MENU_COLORBARS, "Color bars", 0 },
+    { MENU_SMPTE,     "SMPTE",      0 },
+    { MENU_COLORBLEED,"Color Bleed",0 },
     { MENU_VIDEO,     "Video [240p]", 1 },
     { MENU_HELP,      "Help",       1 },
     { MENU_CREDITS,   "Credits",    1 },
