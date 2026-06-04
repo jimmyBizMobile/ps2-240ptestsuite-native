@@ -2,23 +2,51 @@
 #include <gsKit.h>
 #include <dmaKit.h>
 
+// Real framebuffer dimensions (safe-area heights; the mode NAMES are
+// 240p/480i/288p/576i, but we render at these conventional heights).
 #define FB_240P_W  320
 #define FB_240P_H  224
+#define FB_240P_FULL_H 240    // NTSC progressive "full grid" height (15 rows)
 #define FB_480I_W  640
 #define FB_480I_H  448
+#define FB_288P_W  320
+#define FB_288P_H  256
+#define FB_576I_W  640
+#define FB_576I_H  512
 
 static int g_mode = VIDEO_MODE_240P;
+static int g_full_grid = 0;   // 1 = NTSC 240p uses 240 lines (full grid view)
+
+// Effective NTSC progressive height: 240 when full-grid is active, else 224.
+static int ntsc_prog_height(void)
+{
+    return g_full_grid ? FB_240P_FULL_H : FB_240P_H;
+}
+
+static void mode_dims(int mode, int *w, int *h, int *magh)
+{
+    switch (mode) {
+    case VIDEO_MODE_240P: *w = FB_240P_W; *h = ntsc_prog_height(); *magh = VIDEO_MAGH_240P; break;
+    case VIDEO_MODE_480I: *w = FB_480I_W; *h = FB_480I_H; *magh = VIDEO_MAGH_480I; break;
+    case VIDEO_MODE_288P: *w = FB_288P_W; *h = FB_288P_H; *magh = VIDEO_MAGH_288P; break;
+    case VIDEO_MODE_576I: *w = FB_576I_W; *h = FB_576I_H; *magh = VIDEO_MAGH_576I; break;
+    default:              *w = FB_240P_W; *h = FB_240P_H; *magh = VIDEO_MAGH_240P; break;
+    }
+}
 
 static void apply_mode_to_gs(GSGLOBAL *gs, int mode)
 {
-    if (mode == VIDEO_MODE_240P) {
-        gs->Width = FB_240P_W;  gs->Height = FB_240P_H;
+    int fb_w, fb_h, magh;
+    mode_dims(mode, &fb_w, &fb_h, &magh);
+
+    gs->Width  = fb_w;
+    gs->Height = fb_h;
+    if (VIDEO_IS_PROG(mode)) {
         gs->Interlace = GS_NONINTERLACED;  gs->Field = GS_FRAME;
     } else {
-        gs->Width = FB_480I_W;  gs->Height = FB_480I_H;
-        gs->Interlace = GS_INTERLACED;  gs->Field = GS_FIELD;
+        gs->Interlace = GS_INTERLACED;     gs->Field = GS_FIELD;
     }
-    gs->Mode  = GS_MODE_NTSC;
+    gs->Mode  = VIDEO_IS_PAL(mode) ? GS_MODE_PAL : GS_MODE_NTSC;
     gs->PSM   = GS_PSM_CT24;
     gs->PSMZ  = GS_PSMZ_16S;
     gs->ZBuffering      = GS_SETTING_OFF;
@@ -27,52 +55,24 @@ static void apply_mode_to_gs(GSGLOBAL *gs, int mode)
 
     gsKit_init_screen(gs);
 
-    if (mode == VIDEO_MODE_240P) {
+    if (VIDEO_IS_PROG(mode)) {
+        // Progressive (240p/288p): override to the conventional active width
+        // (narrower than gsKit's wide default) and recenter. No scan
+        // extension - solid primitives fill the framebuffer and reach the
+        // edges on their own.
         int center  = gs->StartX + gs->DW / 2;
         int centerY = gs->StartY + gs->DH / 2;
-        gs->MagH    = VIDEO_MAGH_240P;
-        int real_dw = FB_240P_W * (gs->MagH + 1);
-        int real_dh = FB_240P_H * (gs->MagV + 1);
-        //before  gs->DW = real_dw + (gs->MagH + 1);   // +1 column anti-clip
-        gs->DW = real_dw;
+        gs->MagH    = magh;
+        int real_dw = fb_w * (gs->MagH + 1);
+        int real_dh = fb_h * (gs->MagV + 1);
+        gs->DW     = real_dw;
         gs->StartX = center - real_dw / 2;
-        //before gs->DH = real_dh + (gs->MagV + 1);   // +1 row anti-clip
-        gs->DH = real_dh;
+        gs->DH     = real_dh;
         gs->StartY = centerY - real_dh / 2;
     }
+    // Interlaced (480i/576i): gsKit default geometry is correct; leave as is.
 
-    // In 240p the last framebuffer column/row lands exactly on the display
-    // scan boundary (StartX+DW / StartY+DH) and gets clipped. 480i has
-    // margin and is fine. For 240p ONLY, extend the scan by one
-    // magnification unit on each axis so the final column/row is displayed.
-    // (Patterns are now drawn with solid primitives, which fill the
-    // framebuffer fully; this ensures that framebuffer reaches the screen.)
-
-    /*int center  = gs->StartX + gs->DW / 2;
-    int centerY = gs->StartY + gs->DH / 2;
-    int magh    = (mode == VIDEO_MODE_240P) ? VIDEO_MAGH_240P : VIDEO_MAGH_480I;
-    int fb_w    = (mode == VIDEO_MODE_240P) ? FB_240P_W : FB_480I_W;
-    int magv    = gs->MagV;
-    gs->MagH = magh;
-
-    if (mode == VIDEO_MODE_240P) {
-        int real_dw = fb_w * (magh + 1);
-        int real_dh = FB_240P_H * (magv + 1);
-        gs->DW     = real_dw + (magh + 1);   // extend right scan by one column
-        gs->StartX = center - real_dw / 2;
-        gs->DH     = real_dh + (magv + 1);   // extend bottom scan by one row
-        gs->StartY = centerY - real_dh / 2;
-    } 
-    else {
-        // 480i: original working behavior, untouched.
-        gs->DW     = fb_w * (magh + 1);
-        gs->StartX = center - gs->DW / 2;
-    }
-        */
     gsKit_set_display_offset(gs, 0, 0);
-
-
-
     gsKit_mode_switch(gs, GS_ONESHOT);
 
     g_mode = mode;
@@ -96,14 +96,64 @@ void video_set_mode(GSGLOBAL *gs, int mode)
     apply_mode_to_gs(gs, mode);
 }
 
+// Progressive <-> interlaced within the current region.
 void video_toggle_mode(GSGLOBAL *gs)
 {
-    video_set_mode(gs, (g_mode == VIDEO_MODE_240P) ? VIDEO_MODE_480I : VIDEO_MODE_240P);
+    g_full_grid = 0;   // never carry the full-grid height across a mode change
+    int m = g_mode;
+    switch (m) {
+    case VIDEO_MODE_240P: m = VIDEO_MODE_480I; break;
+    case VIDEO_MODE_480I: m = VIDEO_MODE_240P; break;
+    case VIDEO_MODE_288P: m = VIDEO_MODE_576I; break;
+    case VIDEO_MODE_576I: m = VIDEO_MODE_288P; break;
+    }
+    video_set_mode(gs, m);
+}
+
+// NTSC <-> PAL, keeping the progressive/interlaced choice.
+void video_toggle_region(GSGLOBAL *gs)
+{
+    g_full_grid = 0;   // full-grid is NTSC-progressive only
+    int m = g_mode;
+    switch (m) {
+    case VIDEO_MODE_240P: m = VIDEO_MODE_288P; break;
+    case VIDEO_MODE_288P: m = VIDEO_MODE_240P; break;
+    case VIDEO_MODE_480I: m = VIDEO_MODE_576I; break;
+    case VIDEO_MODE_576I: m = VIDEO_MODE_480I; break;
+    }
+    video_set_mode(gs, m);
 }
 
 int video_current_mode(void) { return g_mode; }
-int video_width(void)  { return (g_mode == VIDEO_MODE_240P) ? FB_240P_W : FB_480I_W; }
-int video_height(void) { return (g_mode == VIDEO_MODE_240P) ? FB_240P_H : FB_480I_H; }
+
+int video_width(void)  { int w,h,m; mode_dims(g_mode,&w,&h,&m); return w; }
+int video_height(void) { int w,h,m; mode_dims(g_mode,&w,&h,&m); return h; }
+
+// Logical design height for pattern vertical layout in the 320-wide design
+// space: 224 (NTSC) or 256 (PAL), or 240 when the NTSC full-grid view is
+// active. The integer scale s = width/320 scales this to the framebuffer.
+int video_design_height(void)
+{
+    if (VIDEO_IS_PAL(g_mode)) return FB_288P_H;          // 256
+    return ntsc_prog_height();                            // 224 or 240 (full grid)
+}
+
+int video_is_pal(void) { return VIDEO_IS_PAL(g_mode); }
+
+int video_ntsc_full_grid(void) { return g_full_grid; }
+
+void video_set_ntsc_full_grid(GSGLOBAL *gs, int enable)
+{
+    // Only meaningful in NTSC progressive (240p). Ignored otherwise.
+    if (!VIDEO_IS_PROG(g_mode) || VIDEO_IS_PAL(g_mode)) {
+        g_full_grid = 0;
+        return;
+    }
+    enable = enable ? 1 : 0;
+    if (enable == g_full_grid) return;
+    g_full_grid = enable;
+    apply_mode_to_gs(gs, g_mode);   // re-init screen with the new height
+}
 
 void video_clear_black(GSGLOBAL *gs)
 {

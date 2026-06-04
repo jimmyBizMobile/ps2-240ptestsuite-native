@@ -1,4 +1,4 @@
-EE_BIN  = grid.elf
+EE_BIN  = 240ptest-suite.elf
 EE_OBJS = src/main.o src/video.o src/pad.o src/patterns.o src/menu.o src/font.o src/sysinfo.o src/assets_data.o
 
 EE_INCS    = -I$(GSKIT)/include -Isrc

@@ -10,4 +10,7 @@ const char *sysinfo_output_label(void);
 // "Japanese PlayStation 2" or "PlayStation 2", from the console language.
 const char *sysinfo_console_label(void);
 
+// 1 if this is a PAL console (region 'E' = Europe), 0 otherwise (NTSC).
+int sysinfo_is_pal(void);
+
 #endif

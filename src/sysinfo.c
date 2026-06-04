@@ -19,12 +19,13 @@ const char *sysinfo_output_label(void)
 
 // ROMVER lives in the boot ROM as "VVVVRTYYYYMMDD"; char index 4 is the
 // hardware region, independent of the OSD language the user picked.
-const char *sysinfo_console_label(void)
+// Read it once and cache it.
+static char sysinfo_region_char(void)
 {
-    static char label[32];
-    static int initialized = 0;
-    if (initialized) return label;
-    initialized = 1;
+    static int cached = 0;
+    static char region = '?';
+    if (cached) return region;
+    cached = 1;
 
     char romver[16];
     int fd = open("rom0:ROMVER", O_RDONLY);
@@ -32,7 +33,27 @@ const char *sysinfo_console_label(void)
         read(fd, romver, 14);
         romver[14] = '\0';
         close(fd);
-        char region = romver[4];
+        region = romver[4];
+    }
+    return region;
+}
+
+// PAL consoles are the European region ('E'). All others (J/A/H/C/R) are
+// NTSC. (If the region can't be read, default to NTSC.)
+int sysinfo_is_pal(void)
+{
+    return sysinfo_region_char() == 'E';
+}
+
+const char *sysinfo_console_label(void)
+{
+    static char label[32];
+    static int initialized = 0;
+    if (initialized) return label;
+    initialized = 1;
+
+    char region = sysinfo_region_char();
+    if (region != '?') {
         const char *r;
         switch (region) {
             case 'J': r = "Japan";        break;

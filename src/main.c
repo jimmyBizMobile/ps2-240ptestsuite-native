@@ -1,11 +1,13 @@
 // PS2 240p Test Suite (native) - Wii-style menu.
 //
 // Controls:
-//   UP/DOWN  - move selection
-//   CROSS    - activate item
+//   UP/DOWN  - move selection (menu)
+//   CROSS    - activate item; on Region/Video items, toggles them
 //   CIRCLE   - return to menu (from a pattern/info scene)
-//   TRIANGLE - toggle 240p/480i (any scene)
+//   SQUARE   - SMPTE 75%/100% (on the SMPTE screen)
 //   SELECT   - quit to browser
+// Mode (progressive/interlaced) and Region (NTSC/PAL) are changed only via
+// their menu items - never from within a pattern scene.
 
 #include <kernel.h>
 #include <sifrpc.h>
@@ -18,6 +20,7 @@
 #include "patterns.h"
 #include "menu.h"
 #include "font.h"
+#include "sysinfo.h"
 
 typedef enum {
     SCENE_MENU,
@@ -42,7 +45,7 @@ static void reload_all(GSGLOBAL *gs)
 static void draw_info(GSGLOBAL *gs, const char *const *lines, int n)
 {
     patterns_draw_background(gs);
-    int is_480i = (video_current_mode() == VIDEO_MODE_480I);
+    int is_480i = !VIDEO_IS_PROG(video_current_mode());  // interlaced: 480i or 576i
     float sc   = is_480i ? 0.8f : 0.4f;
     float x    = is_480i ? 60.0f : 30.0f;
     float top  = is_480i ? 80.0f : 40.0f;
@@ -56,12 +59,13 @@ static const char *help_lines[] = {
     "HELP",
     "",
     "Grid        - geometry / convergence",
-    "Monoscope   - overall calibration",
+    "Monoscope   - overall calibration (NTSC)",
     "Pluge       - black level (brightness)",
     "Color bars  - color / saturation",
     "SMPTE       - color check, SQUARE toggles 75/100",
     "Color bleed - stripes show color smearing",
-    "TRIANGLE toggles 240p / 480i",
+    "Region item - toggle NTSC / PAL",
+    "Video item  - toggle progressive / interlaced",
     "CIRCLE returns to this menu",
     "SELECT quits to browser",
 };
@@ -86,7 +90,10 @@ int main(int argc, char *argv[])
     SifLoadModule("rom0:SIO2MAN", 0, NULL);
     SifLoadModule("rom0:PADMAN", 0, NULL);
 
-    GSGLOBAL *gs = video_init(VIDEO_MODE_240P);
+    // Start in the progressive mode matching the console's region:
+    // 288p on a PAL console, 240p on NTSC.
+    int initial_mode = sysinfo_is_pal() ? VIDEO_MODE_288P : VIDEO_MODE_240P;
+    GSGLOBAL *gs = video_init(initial_mode);
     pad_init();
     reload_all(gs);
 
@@ -95,28 +102,37 @@ int main(int argc, char *argv[])
 
         if (pad_pressed(PAD_SELECT)) break;
 
-        if (pad_pressed(PAD_TRIANGLE)) {
-            video_toggle_mode(gs);
-            reload_all(gs);
-        }
-        if (g_scene == SCENE_SMPTE && pad_pressed(PAD_SQUARE)){
-            patterns_smpte_toggle();
-        }
-
-
         if (g_scene == SCENE_MENU) {
             if (pad_pressed(PAD_UP))   menu_move_up();
             if (pad_pressed(PAD_DOWN)) menu_move_down();
             if (pad_pressed(PAD_CROSS)) {
                 switch (menu_current()) {
-                case MENU_GRID:       g_scene = SCENE_GRID;       break;
-                case MENU_MONOSCOPE:  g_scene = SCENE_MONOSCOPE;  break;
+                case MENU_GRID:
+                    // Normal grid (224 in NTSC 240p, mode height elsewhere).
+                    video_set_ntsc_full_grid(gs, 0);
+                    g_scene = SCENE_GRID;
+                    break;
+                case MENU_GRID_FULL:
+                    // NTSC 240p full grid: switch framebuffer to 240 lines.
+                    video_set_ntsc_full_grid(gs, 1);
+                    reload_all(gs);
+                    g_scene = SCENE_GRID;
+                    break;
+                case MENU_MONOSCOPE:
+                    if (!video_is_pal()) g_scene = SCENE_MONOSCOPE;  // NTSC only
+                    break;
                 case MENU_PLUGE:      g_scene = SCENE_PLUGE;      break;
                 case MENU_COLORBARS:  g_scene = SCENE_COLORBARS;  break;
                 case MENU_SMPTE:      g_scene = SCENE_SMPTE;      break;
                 case MENU_COLORBLEED: g_scene = SCENE_COLORBLEED; break;
+                case MENU_REGION:
+                    video_toggle_region(gs);
+                    menu_validate_selection();
+                    reload_all(gs);
+                    break;
                 case MENU_VIDEO:
                     video_toggle_mode(gs);
+                    menu_validate_selection();
                     reload_all(gs);
                     break;
                 case MENU_HELP:    g_scene = SCENE_HELP;    break;
@@ -125,7 +141,19 @@ int main(int argc, char *argv[])
                 }
             }
         } else {
-            if (pad_pressed(PAD_CIRCLE)) g_scene = SCENE_MENU;
+            // In a pattern/info scene only CIRCLE (back) and, on SMPTE,
+            // SQUARE (75/100%) do anything. No mode/region changes here.
+            if (g_scene == SCENE_SMPTE && pad_pressed(PAD_SQUARE))
+                patterns_smpte_toggle();
+            if (pad_pressed(PAD_CIRCLE)) {
+                // Leaving the grid: restore the normal 224 framebuffer if the
+                // full-grid 240 view was active.
+                if (g_scene == SCENE_GRID && video_ntsc_full_grid()) {
+                    video_set_ntsc_full_grid(gs, 0);
+                    reload_all(gs);
+                }
+                g_scene = SCENE_MENU;
+            }
         }
 
         video_clear_black(gs);

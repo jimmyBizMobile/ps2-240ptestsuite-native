@@ -73,9 +73,10 @@ void patterns_draw_grid(GSGLOBAL *gs)
     if (s < 1) s = 1;
 
     const int CELL = 16;
-    const int NCOLS = 320 / CELL;   // 20
-    const int NROWS = 224 / CELL;   // 14
-    const int W = 320, H = 224;
+    const int NCOLS = 320 / CELL;                 // 20
+    const int DH    = video_design_height();      // 224 (NTSC) or 256 (PAL)
+    const int NROWS = DH / CELL;                  // 14 (NTSC) or 16 (PAL)
+    const int W = 320, H = DH;
 
     u64 black = GS_SETREG_RGBAQ(0, 0, 0, 0x80, 0);
     u64 red   = GS_SETREG_RGBAQ(0xFF, 0, 0, 0x80, 0);
@@ -157,6 +158,7 @@ void patterns_draw_pluge(GSGLOBAL *gs)
     int sw = video_width();
     int s  = sw / 320;
     if (s < 1) s = 1;
+    int voff = (video_design_height() - 224) / 2;   // 0 NTSC, +16 PAL
 
     u64 c_white = GS_SETREG_RGBAQ(255, 255, 255, 0x80, 0);  // PS2 max white
     u64 c_lgray = GS_SETREG_RGBAQ(176, 176, 176, 0x80, 0);
@@ -168,8 +170,8 @@ void patterns_draw_pluge(GSGLOBAL *gs)
     gsKit_clear(gs, GS_SETREG_RGBAQ(0, 0, 0, 0x80, 0));
 
     #define R(x,y,w,h,col) gsKit_prim_sprite(gs, \
-        (float)((x)*s), (float)((y)*s), \
-        (float)(((x)+(w))*s), (float)(((y)+(h))*s), 2, (col))
+        (float)((x)*s), (float)(((y)+voff)*s), \
+        (float)(((x)+(w))*s), (float)(((y)+voff+(h))*s), 2, (col))
 
     // center grayscale stack (4 bands of 40px)
     R(120, 32,  80, 40, c_white);
@@ -200,6 +202,7 @@ void patterns_draw_colorbars(GSGLOBAL *gs)
     int sw = video_width();
     int s  = sw / 320;
     if (s < 1) s = 1;
+    int voff = (video_design_height() - 224) / 2;   // 0 NTSC, +16 PAL
 
     const int NCOL = 16;        // 0x0 .. 0xF
     const int X0 = 32, STEPW = 16, BARH = 32;     // 16*16 = 256px wide
@@ -208,8 +211,8 @@ void patterns_draw_colorbars(GSGLOBAL *gs)
     gsKit_clear(gs, GS_SETREG_RGBAQ(0, 0, 0, 0x80, 0));
 
     #define R(x,y,w,h,col) gsKit_prim_sprite(gs, \
-        (float)((x)*s), (float)((y)*s), \
-        (float)(((x)+(w))*s), (float)(((y)+(h))*s), 2, (col))
+        (float)((x)*s), (float)(((y)+voff)*s), \
+        (float)(((x)+(w))*s), (float)(((y)+voff+(h))*s), 2, (col))
 
     for (int i = 0; i < NCOL; i++) {
         int v = i * 0x11;            // 0x00, 0x11, 0x22, ... 0xFF
@@ -228,17 +231,17 @@ void patterns_draw_colorbars(GSGLOBAL *gs)
     u64 blue = GS_SETREG_RGBAQ(0x00, 0x00, 0xFF, 0x80, 0);
     u64 white = GS_SETREG_RGBAQ(0x80, 0x80, 0x80, 0x80, 0);
     float fsc = (s >= 2) ? 1.0f : 0.5f;
-    font_print(gs, 2.0f * s, (yR + 11) * s, fsc, red, "RED");
-    font_print(gs, 2.0f * s, (yG + 11) * s, fsc, green, "GREEN");
-    font_print(gs, 2.0f * s, (yB + 11) * s, fsc, blue, "BLUE");
-    font_print(gs, 2.0f * s, (yW + 11) * s, fsc, white, "WHITE");
+    font_print(gs, 2.0f * s, (yR + 11 + voff) * s, fsc, red, "RED");
+    font_print(gs, 2.0f * s, (yG + 11 + voff) * s, fsc, green, "GREEN");
+    font_print(gs, 2.0f * s, (yB + 11 + voff) * s, fsc, blue, "BLUE");
+    font_print(gs, 2.0f * s, (yW + 11 + voff) * s, fsc, white, "WHITE");
 
     // Optional hex column header 0..F across the top of the bars.
     const char *hex = "0123456789ABCDEF";
     char ch[2] = {0,0};
     for (int i = 0; i < NCOL; i++) {
         ch[0] = hex[i];
-        font_print(gs, (X0 + i*STEPW + 4) * s, (yR - 12) * s, fsc, white, ch);
+        font_print(gs, (X0 + i*STEPW + 4) * s, (yR - 12 + voff) * s, fsc, white, ch);
     }
 }
 
@@ -288,10 +291,14 @@ void patterns_draw_smpte(GSGLOBAL *gs)
         (float)((x)*s), (float)((y)*s), \
         (float)(((x)+(w))*s), (float)(((y)+(h))*s), 2, (col))
 
-    // section heights (sum to 224): top 150, middle 18, bottom 56
-    const int TOP_H = 150, MID_H = 18, BOT_H = 56;
-    const int MID_Y = TOP_H;              // 150
-    const int BOT_Y = TOP_H + MID_H;      // 168
+    // section heights (sum to the design height). NTSC 224: 150/18/56.
+    // PAL 256: 171/21/64. Both preserve the ~67/8/25 ratio.
+    int pal = (video_design_height() > 224);
+    const int TOP_H = pal ? 171 : 150;
+    const int MID_H = pal ? 21  : 18;
+    const int BOT_H = pal ? 64  : 56;
+    const int MID_Y = TOP_H;
+    const int BOT_Y = TOP_H + MID_H;
 
     // bar x-boundaries (320-wide, from the reference)
     int bx[8] = {0, 46, 92, 138, 183, 228, 274, 320};
@@ -325,6 +332,7 @@ void patterns_draw_colorbleed(GSGLOBAL *gs)
     int sw = video_width();
     int s  = sw / 320;
     if (s < 1) s = 1;
+    int voff = (video_design_height() - 224) / 2;   // 0 NTSC, +16 PAL
 
     u64 c_red   = GS_SETREG_RGBAQ(240, 0,   0,   0x80, 0);
     u64 c_green = GS_SETREG_RGBAQ(0,   244, 0,   0x80, 0);
@@ -336,10 +344,11 @@ void patterns_draw_colorbleed(GSGLOBAL *gs)
     int yb[4] = {40, 80, 120, 160};
     u64 cb[4] = {c_red, c_green, c_blue, c_white};
     for (int b = 0; b < 4; b++) {
+        int y0 = yb[b] + voff;
         for (int x = 16; x <= 302; x += 2) {      // lit every other column
             gsKit_prim_sprite(gs,
-                (float)(x*s), (float)(yb[b]*s),
-                (float)((x+1)*s), (float)((yb[b]+32)*s), 2, cb[b]);
+                (float)(x*s), (float)(y0*s),
+                (float)((x+1)*s), (float)((y0+32)*s), 2, cb[b]);
         }
     }
 }
